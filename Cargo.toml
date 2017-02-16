@@ -1,6 +1,7 @@
 [package]
 name = "ferric_convecterm"
 version = "0.1.0"
-authors = ["Luke Mondy <luke.s.mondy@gmail.com>"]
+authors = ["Luke Mondy <luke@malondy.net>"]
 
 [dependencies]
+
