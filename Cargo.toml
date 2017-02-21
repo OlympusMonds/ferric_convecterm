@@ -4,4 +4,5 @@ version = "0.1.0"
 authors = ["Luke Mondy <luke@malondy.net>"]
 
 [dependencies]
-
+nalgebra = "0.11"
+colored = "1.4"

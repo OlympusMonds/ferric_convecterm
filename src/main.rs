@@ -1,3 +1,11 @@
+#[macro_use]
+extern crate nalgebra as na;
+use na::{MatrixNM, U21};
+extern crate colored;
+use colored::*;
+
+type StorMat = MatrixNM<f64, U21, U21>;
+
 
 struct BasicContext {
     xmin : f64,
@@ -16,17 +24,17 @@ struct BasicContext {
 }
 
 struct Context {
-    u   : Vec<f64>,  // vel in x
-    un  : Vec<f64>,  // vel in x
-    v   : Vec<f64>,  // vel in y
-    vn  : Vec<f64>,  // vel in y
-    p   : Vec<f64>,  // pressure
-    pn  : Vec<f64>,  // pressure
-    rho : Vec<f64>,  // density
-    nu  : Vec<f64>,  // viscosity
-    t   : Vec<f64>,  // temp
-    tn  : Vec<f64>,  // temp
-    k   : Vec<f64>,  // conductivity
+    u   : StorMat,  // vel in x
+    un  : StorMat,  // vel in x
+    v   : StorMat,  // vel in y
+    vn  : StorMat,  // vel in y
+    p   : StorMat,  // pressure
+    pn  : StorMat,  // pressure
+    rho : StorMat,  // density
+    nu  : StorMat,  // viscosity
+    t   : StorMat,  // temp
+    tn  : StorMat,  // temp
+    k   : StorMat,  // conductivity
 }
 
 
@@ -84,7 +92,6 @@ fn apply_thermal_bc(bc : &BasicContext, c : & mut Context) {
     }
 }
 
-
 fn solve_advection_diffusion(bc : &BasicContext, c : & mut Context) {
     let mut kx : f64;
     let mut ky : f64;
@@ -101,15 +108,15 @@ fn solve_advection_diffusion(bc : &BasicContext, c : & mut Context) {
     }
 
     let mut m : usize;  // middle
-    let mut n : u32;  // north
+    let mut n : usize;  // north
     let mut e : usize;
     let mut s : usize;
     let mut w : usize;  // west
 
-    for j in 0..bc.ny {
-        for i in 0..bc.nx {
+    for j in 1..bc.ny-1 {
+        for i in 1..bc.nx-1 {
             m = (bc.nx * j + i) as usize;
-            n = (bc.nx * (j-1) + i);
+            n = (bc.nx * (j-1) + i) as usize;
             s = (bc.nx * (j+1) + i) as usize;
             e = (bc.nx * j + (i+1)) as usize;
             w = (bc.nx * j + (i-1)) as usize;
@@ -117,6 +124,10 @@ fn solve_advection_diffusion(bc : &BasicContext, c : & mut Context) {
             kx = c.k[m] + (c.tn[e] - 2. * c.tn[m] + c.tn[w]) / dx2;
             ky = c.k[m] + (c.tn[s] - 2. * c.tn[m] + c.tn[n]) / dx2;
 
+            c.t[m] = c.tn[m] + bc.dt * ((bc.H + kx + ky) / (c.rho[m] * bc.cp) 
+                                        - (c.u[m] * ( (c.tn[e] - c.tn[w]) / twodx ))
+                                        - (c.v[m] * ( (c.tn[s] - c.tn[n]) / twody )) 
+                                       );
         }
     }
 
@@ -124,15 +135,45 @@ fn solve_advection_diffusion(bc : &BasicContext, c : & mut Context) {
 }
 
 
-fn print_field(bc : &BasicContext, field : & Vec<f64>) {
+fn print_field(bc : &BasicContext, field : & StorMat,
+               min : f64, max : f64) {
+
+    let mut idx : usize;
+    let mut norm : f64;
+    //let mut cval : u8;
+
+    let r1 = ((max - min) * 0.1429)  + min;
+    let r2 = ((max - min) * 0.28571) + min;
+    let r3 = ((max - min) * 0.42857) + min;
+    let r4 = ((max - min) * 0.57128) + min;
+    let r5 = ((max - min) * 0.71429) + min;
+    let r6 = ((max - min) * 0.85714) + min;
+
+    println!("{} {} {} {} {} {}", r1, r2, r3, r4, r5, r6);
+
     for jj in 0..bc.ny {
         let j = bc.ny - jj - 1;
         for i in 0..bc.nx {
-            let idx = (bc.nx * j + i) as usize;
+            idx = (bc.nx * j + i) as usize;
+            norm = field[idx];
 
-            print!("{} ", field[idx]);
+            if norm < r1 {
+                print!("{}", "##".blue().bold());
+            } else if norm >= r1 && norm < r2 {
+                print!("{}", "##".cyan().bold());
+            } else if norm >= r2 && norm < r3 {
+                print!("{}", "##".green().bold());
+            } else if norm >= r3 && norm < r4 {
+                print!("{}", "##".white().bold());
+            } else if norm >= r4 && norm < r5 {
+                print!("{}", "##".yellow().bold());
+            } else if norm >= r5 && norm < r6 {
+                print!("{}", "##".red().bold());
+            } else {
+                print!("{}", "##".magenta().bold());
+            };
         }
-        print!("\n");
+        print!("{}", "\n".normal());
     }
 
 }
@@ -148,7 +189,7 @@ fn main() {
  
                            cp     : 60.,   
                            H      : 0.,    
-                           dt     : 9e-5,  
+                           dt     : 9e-2,  
                            refrho : 100.,  
                            g      : 9.81,  
                          };
@@ -157,19 +198,21 @@ fn main() {
     let dx = ( bc.xmax - bc.xmin ) / (bc.nx as f64);
     let dy = ( bc.ymax - bc.ymin ) / (bc.ny as f64);
 
+    
+
     println!("dx = {}\ndy = {}\nele = {}", dx, dy, ele);
 
-    let mut c = Context{ u   : vec![0.      as f64; ele as usize],  // vel in x
-                         un  : vec![0.      as f64; ele as usize],
-                         v   : vec![0.      as f64; ele as usize],
-                         vn  : vec![0.      as f64; ele as usize],
-                         p   : vec![0.      as f64; ele as usize],
-                         pn  : vec![0.      as f64; ele as usize],
-                         rho : vec![bc.refrho;      ele as usize],
-                         nu  : vec![1.      as f64; ele as usize],
-                         t   : vec![500.    as f64; ele as usize],
-                         tn  : vec![500.    as f64; ele as usize],
-                         k   : vec![100.    as f64; ele as usize],
+    let mut c = Context{ u   : StorMat::from_element(0.),
+                         un  : StorMat::from_element(0.),
+                         v   : StorMat::from_element(0.),
+                         vn  : StorMat::from_element(0.),
+                         p   : StorMat::from_element(0.),
+                         pn  : StorMat::from_element(0.),
+                         rho : StorMat::from_element(bc.refrho),
+                         nu  : StorMat::from_element(1.  ),
+                         t   : StorMat::from_element(500.),
+                         tn  : StorMat::from_element(500.),
+                         k   : StorMat::from_element(100.),
                         };
 
     let mut currenttime = 0.;
@@ -189,7 +232,6 @@ fn main() {
             }
         }
     }
-    print_field(&bc, &c.p);
 
     apply_vel_bc(&bc, & mut c);
     apply_thermal_bc(&bc, & mut c);
@@ -197,12 +239,16 @@ fn main() {
     // Main loop
     loop {
 
-        if timestep > 100 {
+        if timestep > 100000 {
             break
         }
 
         solve_advection_diffusion(&bc, & mut c);
 
         timestep += 1;
+        currenttime += bc.dt;
     }
+
+    println!("Final time: {}", currenttime);
+    print_field(&bc, &c.t, 0., 1000.);
 }
