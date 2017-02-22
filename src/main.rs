@@ -150,14 +150,14 @@ fn print_field(bc : &BasicContext, field : & StorMat,
             norm = (field[idx] - min) / (max - min);
 
             match norm {
-                0f64       ... 0.1429f64  => print!("{}", bchar.blue().bold()),
-                0.1429f64  ... 0.28571f64 => print!("{}", bchar.cyan().bold()),
-                0.28571f64 ... 0.42857f64 => print!("{}", bchar.green().bold()),
-                0.42857f64 ... 0.57128f64 => print!("{}", bchar.white().bold()),
-                0.57128f64 ... 0.71429f64 => print!("{}", bchar.yellow().bold()),
-                0.71429f64 ... 0.85714f64 => print!("{}", bchar.red().bold()),
-                0.85714f64 ... 1f64       => print!("{}", bchar.magenta().bold()),
-                _                         => print!("{}", bchar.black().bold()) // Error - this may an issue in the future
+                0f64       ... 0.1429f64  => print!("{}", bchar.blue()),
+                0.1429f64  ... 0.28571f64 => print!("{}", bchar.cyan()),
+                0.28571f64 ... 0.42857f64 => print!("{}", bchar.green()),
+                0.42857f64 ... 0.57128f64 => print!("{}", bchar.white()),
+                0.57128f64 ... 0.71429f64 => print!("{}", bchar.yellow()),
+                0.71429f64 ... 0.85714f64 => print!("{}", bchar.red()),
+                0.85714f64 ... 1f64       => print!("{}", bchar.magenta()),
+                _                         => print!("{}", bchar.black()) // Error - this may an issue in the future
             }
         }
         print!("{}", "\n".normal());
