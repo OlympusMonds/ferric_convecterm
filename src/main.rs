@@ -1,10 +1,10 @@
 #[macro_use]
 extern crate nalgebra as na;
-use na::{MatrixNM, U21};
+use na::{MatrixNM, U51};
 extern crate colored;
 use colored::*;
 
-type StorMat = MatrixNM<f64, U21, U21>;
+type StorMat = MatrixNM<f64, U51, U51>;
 
 
 struct BasicContext {
@@ -70,6 +70,7 @@ fn apply_vel_bc(bc : &BasicContext, c : & mut Context) {
 
 fn apply_thermal_bc(bc : &BasicContext, c : & mut Context) {
     let mut idx : usize;
+    let mut off : usize;
 
     for j in 0..bc.ny {
         idx = (bc.nx * j) as usize;
@@ -78,17 +79,17 @@ fn apply_thermal_bc(bc : &BasicContext, c : & mut Context) {
         c.t[idx] = c.t[idx + 1];
 
         // right wall, no temp escape
-        let off = idx + (bc.nx - 1) as usize;
+        off = idx + (bc.nx - 1) as usize;
         c.t[off] = c.t[off - 1];
     }
 
     for i in 0..bc.nx {
         // bottom wall 
-        c.v[i as usize] = 1000.;
+        c.t[i as usize] = 1000.;
 
         // top wall
         idx = (bc.nx * (bc.ny - 1) + i) as usize;
-        c.v[idx] = 0.;
+        c.t[idx] = 0.;
     }
 }
 
@@ -140,6 +141,7 @@ fn print_field(bc : &BasicContext, field : & StorMat,
 
     let mut idx : usize;
     let mut norm : f64;
+    let bchar = "██";
     //let mut cval : u8;
 
     let r1 = ((max - min) * 0.1429)  + min;
@@ -150,6 +152,7 @@ fn print_field(bc : &BasicContext, field : & StorMat,
     let r6 = ((max - min) * 0.85714) + min;
 
     println!("{} {} {} {} {} {}", r1, r2, r3, r4, r5, r6);
+    println!("{} {} {} {} {} {} {}", r1-min, r2-r1, r3-r2, r4-r3, r5-r4, r6-r5, max-r6);
 
     for jj in 0..bc.ny {
         let j = bc.ny - jj - 1;
@@ -158,19 +161,19 @@ fn print_field(bc : &BasicContext, field : & StorMat,
             norm = field[idx];
 
             if norm < r1 {
-                print!("{}", "##".blue().bold());
+                print!("{}", bchar.blue().bold());
             } else if norm >= r1 && norm < r2 {
-                print!("{}", "##".cyan().bold());
+                print!("{}", bchar.cyan().bold());
             } else if norm >= r2 && norm < r3 {
-                print!("{}", "##".green().bold());
+                print!("{}", bchar.green().bold());
             } else if norm >= r3 && norm < r4 {
-                print!("{}", "##".white().bold());
+                print!("{}", bchar.white().bold());
             } else if norm >= r4 && norm < r5 {
-                print!("{}", "##".yellow().bold());
+                print!("{}", bchar.yellow().bold());
             } else if norm >= r5 && norm < r6 {
-                print!("{}", "##".red().bold());
+                print!("{}", bchar.red().bold());
             } else {
-                print!("{}", "##".magenta().bold());
+                print!("{}", bchar.magenta().bold());
             };
         }
         print!("{}", "\n".normal());
@@ -184,8 +187,8 @@ fn main() {
                            xmax   : 2.,
                            ymin   : 0.,
                            ymax   : 2.,
-                           nx     : 21,
-                           ny     : 21, 
+                           nx     : 51,
+                           ny     : 51, 
  
                            cp     : 60.,   
                            H      : 0.,    
