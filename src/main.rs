@@ -16,11 +16,16 @@ struct BasicContext {
     nx : u16,  
     ny : u16,  
 
-    cp     : f64,  // heat capacity     
-    H      : f64,  // ummmm...? TODO
-    dt     : f64,  // timestep 
-    refrho : f64,  // reference density
-    g      : f64,  // gravity
+    cp      : f64,  // heat capacity     
+    H       : f64,  // ummmm...? TODO
+    dt      : f64,  // timestep 
+    refrho  : f64,  // reference density
+    reftemp : f64,  // reference temp
+    refnu   : f64,  // reference visc
+    refk    : f64,  // reference conductivity
+    a       : f64,  // thermal expansivity
+    theta   : f64,  // Frank-Kam theta
+    g       : f64,  // gravity
 }
 
 struct Context {
@@ -123,7 +128,7 @@ fn solve_advection_diffusion(bc : &BasicContext, c : & mut Context) {
             w = (bc.nx * j + (i-1)) as usize;
 
             kx = c.k[m] + (c.tn[e] - 2. * c.tn[m] + c.tn[w]) / dx2;
-            ky = c.k[m] + (c.tn[s] - 2. * c.tn[m] + c.tn[n]) / dx2;
+            ky = c.k[m] + (c.tn[s] - 2. * c.tn[m] + c.tn[n]) / dy2;
 
             c.t[m] = c.tn[m] + bc.dt * ((bc.H + kx + ky) / (c.rho[m] * bc.cp) 
                                         - (c.u[m] * ( (c.tn[e] - c.tn[w]) / twodx ))
@@ -133,6 +138,42 @@ fn solve_advection_diffusion(bc : &BasicContext, c : & mut Context) {
     }
 
     apply_thermal_bc(bc, c);
+}
+
+
+fn update_k(bc : &BasicContext, c : & mut Context) {
+    let mut idx : usize;
+
+    for j in 0..bc.ny {
+        for i in 0..bc.nx {
+            idx = (bc.nx * j + i) as usize;
+            c.k[idx] = bc.refk * (1. - (bc.a * (c.t[idx] - bc.reftemp)));
+        }
+    }
+}
+
+
+fn update_nu(bc : &BasicContext, c : & mut Context) {
+    let mut idx : usize;
+
+    for j in 0..bc.ny {
+        for i in 0..bc.nx {
+            idx = (bc.nx * j + i) as usize;
+            c.nu[idx] = bc.refnu * (-bc.theta * ( (c.t[idx] - bc.reftemp) / bc.reftemp)).exp();
+        }
+    }
+}
+
+
+fn update_rho(bc : &BasicContext, c : & mut Context) {
+    let mut idx : usize;
+
+    for j in 0..bc.ny {
+        for i in 0..bc.nx {
+            idx = (bc.nx * j + i) as usize;
+            c.rho[idx] = bc.refrho * (1. - (bc.a * (c.t[idx] - bc.reftemp)));
+        }
+    }
 }
 
 
@@ -148,37 +189,49 @@ fn print_field(bc : &BasicContext, field : & StorMat,
         for i in 0..bc.nx {
             idx = (bc.nx * j + i) as usize;
             norm = (field[idx] - min) / (max - min);
+            if norm < 0.{
+                norm = 0f64;
+            }
+            if norm > 1. {
+                norm = 1f64;
+            }
 
             match norm {
                 0f64       ... 0.1429f64  => print!("{}", bchar.blue()),
-                0.1429f64  ... 0.28571f64 => print!("{}", bchar.cyan()),
-                0.28571f64 ... 0.42857f64 => print!("{}", bchar.green()),
-                0.42857f64 ... 0.57128f64 => print!("{}", bchar.white()),
-                0.57128f64 ... 0.71429f64 => print!("{}", bchar.yellow()),
-                0.71429f64 ... 0.85714f64 => print!("{}", bchar.red()),
-                0.85714f64 ... 1f64       => print!("{}", bchar.magenta()),
+                0.1428f64  ... 0.28571f64 => print!("{}", bchar.cyan()),
+                0.28570f64 ... 0.42857f64 => print!("{}", bchar.green()),
+                0.42856f64 ... 0.57128f64 => print!("{}", bchar.white()),
+                0.57127f64 ... 0.71429f64 => print!("{}", bchar.yellow()),
+                0.71428f64 ... 0.85714f64 => print!("{}", bchar.red()),
+                0.85713f64 ... 1f64       => print!("{}", bchar.magenta()),
                 _                         => print!("{}", bchar.black()) // Error - this may an issue in the future
             }
         }
         print!("{}", "\n".normal());
     }
+    println!("\n");
 
 }
 
 
 fn main() {
-    let bc = BasicContext{ xmin   : 0.,
-                           xmax   : 2.,
-                           ymin   : 0.,
-                           ymax   : 2.,
-                           nx     : 51,
-                           ny     : 51, 
+    let bc = BasicContext{ xmin    : 0.,
+                           xmax    : 2.,
+                           ymin    : 0.,
+                           ymax    : 2.,
+                           nx      : 51,
+                           ny      : 51, 
  
-                           cp     : 60.,   
-                           H      : 0.,    
-                           dt     : 9e-2,  
-                           refrho : 100.,  
-                           g      : 9.81,  
+                           cp      : 60.,   
+                           H       : 0.,    
+                           dt      : 9e-2,  
+                           refrho  : 100.,  
+                           reftemp : 100.,  
+                           refnu   : 1.,  
+                           refk    : 100.,  
+                           a       : 0.001,  
+                           theta   : 1.5,  
+                           g       : 9.81,  
                          };
 
     let ele = bc.nx * bc.ny;
@@ -226,11 +279,18 @@ fn main() {
     // Main loop
     loop {
 
-        if timestep > 100000 {
+        if timestep > 10000 {
             break
         }
 
         solve_advection_diffusion(&bc, & mut c);
+        update_rho(&bc, & mut c);
+        update_nu(&bc, & mut c);
+        update_k(&bc, & mut c);
+
+        if timestep % 1000 == 0 {
+            print_field(&bc, &c.t, 0., 1000.);
+        }
 
         timestep += 1;
         currenttime += bc.dt;
