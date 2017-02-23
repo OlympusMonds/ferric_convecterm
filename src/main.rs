@@ -1,10 +1,10 @@
 #[macro_use]
 extern crate nalgebra as na;
-use na::{MatrixNM, U51};
+use na::{MatrixNM, U101, U51};
 extern crate colored;
 use colored::*;
 
-type StorMat = MatrixNM<f64, U51, U51>;
+type StorMat = MatrixNM<f64, U101, U51>;
 
 
 struct BasicContext {
@@ -40,6 +40,7 @@ struct Context {
     t   : StorMat,  // temp
     tn  : StorMat,  // temp
     k   : StorMat,  // conductivity
+    b   : StorMat,  // b
 }
 
 
@@ -141,6 +142,210 @@ fn solve_advection_diffusion(bc : &BasicContext, c : & mut Context) {
 }
 
 
+fn solve_pressure_poisson(bc : &BasicContext, c : & mut Context) {
+    let mut idx : usize;
+    let mut off : usize;
+
+    let dx = ( bc.xmax - bc.xmin ) / (bc.nx as f64);  // TODO put this in the context
+    let dy = ( bc.ymax - bc.ymin ) / (bc.ny as f64);
+    let dx2 = dx * dx;
+    let dy2 = dy * dy;
+    let twodx = 2. * dx;
+    let twody = 2. * dy;
+    let inv_dt = 1. / bc.dt;
+
+    let mut m : usize;  // middle
+    let mut n : usize;  // north
+    let mut e : usize;
+    let mut s : usize;
+    let mut w : usize;  // west
+
+    // Pre-solve b term.
+    for j in 1..bc.ny-1 {
+        for i in 1..bc.nx-1 {
+            m = (bc.nx * j + i) as usize;
+            n = (bc.nx * (j-1) + i) as usize;
+            s = (bc.nx * (j+1) + i) as usize;
+            e = (bc.nx * j + (i+1)) as usize;
+            w = (bc.nx * j + (i-1)) as usize;
+
+            c.b[m] = (( c.rho[m] * dx2 * dy2 ) / ( 2. * (dx2 + dy2))) *
+                (
+                    inv_dt *
+                    (
+                        (( c.u[e] - c.u[w] ) / twodx ) +
+                        (( c.v[s] - c.v[n] ) / twody )
+                    ) -
+                    (( c.u[e] - c.u[w] ) / twodx).powi(2) -
+                    2. *
+                    ((( c.u[s] - c.u[n] ) / twody ) *
+                     (( c.v[e] - c.v[w] ) / twodx )) -
+                    (( c.v[s] - c.v[n] ) / twody ).powi(2)
+                );
+
+        }
+    }
+
+    let mut stepcount = 0_usize;
+    let mut diff = 1_f64;
+    let mut pd  : f64;
+    let mut pnt : f64;
+    loop {
+        if stepcount >= 1_000_000 {
+            panic!("Unable to solve poisson: sc = {}, diff = {}", stepcount, diff);
+        }
+        if diff < 1e-5 && stepcount > 4 {
+            break;
+        }
+        if stepcount % 10000 == 0 {
+            println!("    Pressure diff: {}", diff);
+        }
+
+        for i in 0..(bc.nx * bc.ny) {
+            c.pn[i as usize] = c.p[i as usize];
+        }
+
+        for j in 1..bc.ny-1 {
+            for i in 1..bc.nx-1 {
+                m = (bc.nx * j + i) as usize;
+                n = (bc.nx * (j-1) + i) as usize;
+                s = (bc.nx * (j+1) + i) as usize;
+                e = (bc.nx * j + (i+1)) as usize;
+                w = (bc.nx * j + (i-1)) as usize;
+
+                c.p[m] = (( c.pn[e] + c.pn[w] ) * dy2 + (c.pn[s] + c.pn[n]) * dx2 ) /
+                          ( 2. * (dx2 + dy2) ) - c.b[m];
+            }
+        }
+
+        // Pressure BCs
+        for j in 0..bc.ny {
+            idx = (bc.nx * j) as usize;
+            c.p[idx] = c.p[idx + 1];
+
+            off = idx + (bc.nx - 1) as usize;
+            c.p[off] = c.p[off - 1];
+        }
+
+        // Check for steady state
+        pd = 0_f64;
+        pnt = 0_f64;
+
+        for i in 0..bc.nx {
+            c.p[i as usize] = c.p[(bc.nx + i) as usize];
+
+            idx = (bc.nx * (bc.ny - 1) + i) as usize;
+            c.p[idx] = c.p[(bc.nx * (bc.ny - 2) + i) as usize];
+        }
+
+        for i in 0..(bc.nx * bc.ny) {
+            c.tn[i as usize] = c.t[i as usize];
+            pd += (c.p[i as usize].abs() - c.pn[i as usize].abs()).abs();
+            pnt += c.pn[i as usize].abs();
+        }
+
+        if pnt > 0. {
+            diff = (pd / pnt).abs();
+        } else {
+            diff = 1_f64;
+        }
+
+        stepcount += 1;
+    }
+}
+
+
+fn solve_stokes_momentum(bc : &BasicContext, c : & mut Context) {
+    let dx = ( bc.xmax - bc.xmin ) / (bc.nx as f64);  // TODO put this in the context
+    let dy = ( bc.ymax - bc.ymin ) / (bc.ny as f64);
+    let dtodx2 = bc.dt / (dx * dx);
+    let dtody2 = bc.dt / (dy * dy);
+
+    let mut m : usize;  // middle
+    let mut n : usize;  // north
+    let mut e : usize;
+    let mut s : usize;
+    let mut w : usize;  // west
+
+    for j in 1..bc.ny-1 {
+        for i in 1..bc.nx-1 {
+            m = (bc.nx * j + i) as usize;
+            n = (bc.nx * (j-1) + i) as usize;
+            s = (bc.nx * (j+1) + i) as usize;
+            e = (bc.nx * j + (i+1)) as usize;
+            w = (bc.nx * j + (i-1)) as usize;
+
+            c.u[m] = c.un[m] - ( bc.dt / (c.rho[m] * 2. * dx) ) * (c.p[e] - c.p[w]) 
+                     + c.nu[m] * (
+                         (dtodx2 * (c.un[e] - 2.*c.un[m] + c.un[w])) +
+                         (dtody2 * (c.un[s] - 2.*c.un[m] + c.un[n])) 
+                         );
+
+            c.v[m] = c.vn[m] - ( bc.dt / (c.rho[m] * 2. * dy) ) * (c.p[e] - c.p[w]) 
+                     + c.nu[m] * (
+                         (dtodx2 * (c.vn[e] - 2.*c.vn[m] + c.vn[w])) +
+                         (dtody2 * (c.vn[s] - 2.*c.vn[m] + c.vn[n])) 
+                         ) - (bc.g * c.rho[m]);
+
+        }
+    }
+}
+
+
+fn solve_flow(bc : &BasicContext, c : & mut Context) {
+    let mut stepcount = 0_usize;
+    let mut diff = 1_f64;
+
+    let mut ud  : f64;
+    let mut vd  : f64;
+    let mut unt : f64;
+    let mut vnt : f64;
+
+    loop {
+        if stepcount >= 50000 {
+            panic!("Unable to solve: sc = {}, diff = {}", stepcount, diff);
+        }
+        if diff < 1e-5 && stepcount >= 2 {
+            break;
+        }
+        if stepcount % 1000 == 0 {
+            println!("Stokes diff: {}", diff);
+        }
+
+        for i in 0..(bc.nx * bc.ny) {
+            c.un[i as usize] = c.u[i as usize];
+            c.vn[i as usize] = c.v[i as usize];
+        }
+
+        solve_pressure_poisson(bc, c);
+        solve_stokes_momentum(bc, c);
+
+        apply_vel_bc(bc, c);
+
+        ud  = 0_f64;
+        vd  = 0_f64;
+        unt = 0_f64;
+        vnt = 0_f64;
+
+        for i in 0..(bc.nx * bc.ny) {
+            ud += (c.u[i as usize].abs() - c.un[i as usize].abs()).abs();
+            unt += c.un[i as usize].abs();
+
+            vd += (c.v[i as usize].abs() - c.vn[i as usize].abs()).abs();
+            vnt += c.vn[i as usize].abs();
+        }
+
+        if unt > 0. && vnt > 0. {
+            diff = ( (ud / unt).abs() - (vd / vnt).abs() ) / 2.;
+        } else {
+            diff = 1_f64;
+        }
+
+        stepcount += 1;
+    }
+}
+
+
 fn update_k(bc : &BasicContext, c : & mut Context) {
     let mut idx : usize;
 
@@ -216,22 +421,22 @@ fn print_field(bc : &BasicContext, field : & StorMat,
 
 fn main() {
     let bc = BasicContext{ xmin    : 0.,
-                           xmax    : 2.,
+                           xmax    : 5.,
                            ymin    : 0.,
-                           ymax    : 2.,
-                           nx      : 51,
+                           ymax    : 2.5,
+                           nx      : 101,
                            ny      : 51, 
  
                            cp      : 60.,   
                            H       : 0.,    
-                           dt      : 9e-2,  
+                           dt      : 9e-5,  
                            refrho  : 100.,  
                            reftemp : 100.,  
                            refnu   : 1.,  
                            refk    : 100.,  
                            a       : 0.001,  
                            theta   : 1.5,  
-                           g       : 9.81,  
+                           g       : 0.0003,  
                          };
 
     let ele = bc.nx * bc.ny;
@@ -253,6 +458,7 @@ fn main() {
                          t   : StorMat::from_element(500.),
                          tn  : StorMat::from_element(500.),
                          k   : StorMat::from_element(100.),
+                         b   : StorMat::from_element(0.),
                         };
 
     let mut currenttime = 0.;
@@ -287,6 +493,7 @@ fn main() {
         update_rho(&bc, & mut c);
         update_nu(&bc, & mut c);
         update_k(&bc, & mut c);
+        solve_flow(&bc, & mut c);
 
         if timestep % 1000 == 0 {
             print_field(&bc, &c.t, 0., 1000.);
